@@ -14,7 +14,11 @@ const paragraphAndHeadingRegex = /<(h[1-6]|p dir="[^"]*")>([^]*?)<\/(h[1-6]|p)>/
 
 const noteRegex = /<p dir="[^"]*">!!! (info|warning|important) \[([a-zA-Z0-9]*)\]: ((.|<br \/>\n)*)<\/p>/g;
 
-const spoilerRegex = /(?:<p dir="[^"]*">)(?:\|\|)([^]*?)(?:\|\|)(?:<\/p>)/g;
+// A spoiler is a block of one or more lines that starts with "||" and ends with "||".
+// It does not have to be its own paragraph: a plain line break before and after it is enough.
+const paragraphRegex = /<p dir="([^"]*)">([^]*?)<\/p>/g;
+const lineBreak = '<br />\n';
+const spoilerLineRegex = /(?:^|<br \/>\n)\|\|([^]*?)\|\|(?=<br \/>\n|$)/g;
 
 const noteIcons = {
     info: 'fa-info-circle',
@@ -168,26 +172,50 @@ function generateAnchorFromHeading(heading) {
 }
 
 function applySpoiler(textContent, id) {
-    if (textContent.match(spoilerRegex)) {
-        let count = 0;
-        textContent = textContent.replace(spoilerRegex, (match, text) => {
+    if (!textContent.includes('||')) {
+        return textContent;
+    }
+    let count = 0;
+    return textContent.replace(paragraphRegex, (paragraph, dir, inner) => {
+        if (!inner.includes('||')) {
+            return paragraph;
+        }
+        const parts = [];
+        let last = 0;
+        inner.replace(spoilerLineRegex, (match, text, offset) => {
+            parts.push(inner.slice(last, offset));
             // "<pid>-<n>": adding the numbers made the second spoiler of post 2200 "spoiler2201",
             // the id of the first spoiler of post 2201, and the button then opened the wrong one
-            const spoilerId = `spoiler${id === "" ? "" : `${id}-`}${count}`;
-            const spoilerButton = `
+            parts.push(renderSpoiler(text, `spoiler${id === "" ? "" : `${id}-`}${count}`));
+            count++;
+            last = offset + match.length;
+            // the line break that followed the closing "||" belongs to the spoiler, drop it
+            if (inner.startsWith(lineBreak, last)) {
+                last += lineBreak.length;
+            }
+            return match;
+        });
+        if (!parts.length) {
+            return paragraph;
+        }
+        parts.push(inner.slice(last));
+        return parts
+            .map((part, index) => (index % 2 === 0 ? (part ? `<p dir="${dir}">${part}</p>` : '') : part))
+            .join('\n');
+    });
+}
+
+function renderSpoiler(text, spoilerId) {
+    const spoilerButton = `
                 <button class="btn btn-primary extended-markdown-spoiler" type="button" name="spoiler" data-bs-toggle="collapse" data-bs-target="#${spoilerId}" aria-expanded="false" aria-controls="${spoilerId}">
                     Spoiler <i class="fa fa-eye"></i>
                 </button>`;
 
-            const spoilerContent = `
+    const spoilerContent = `
                 <div class="collapse" id="${spoilerId}">
                     <div class="card card-body spoiler"><p dir="auto">${text}</p></div>
                 </div>`;
-            count++;
-            return `<p>${spoilerButton}${spoilerContent}</p>`;
-        });
-    }
-    return textContent;
+    return `<p>${spoilerButton}${spoilerContent}</p>`;
 }
 
 module.exports = ExtendedMarkdown;
